@@ -1,0 +1,1470 @@
+## instalar limma 
+if (!requireNamespace("BiocManager", quietly = TRUE))
+  install.packages("BiocManager")
+BiocManager::install("limma")
+
+## Pacote para converter para genes  
+try http:// if https:// URLs are not supported
+source("https://bioconductor.org/biocLite.R")
+biocLite("EnsDb.Hsapiens.v86")
+
+## instalar bibliotecas 
+install.packages("foreign", dependencies= TRUE)
+
+## Chamar biblioteca 
+library(limma)
+library(dplyr)
+library(tidyr)
+library(plyr)
+library(biomaRt)
+library(EnsDb.Hsapiens.v86)
+library(foreign)
+library(RCurl)
+library(tidyverse)
+library("RSQLite")
+library(lavaan)
+
+
+install.packages("dplyr", dependencies = TRUE)
+
+###################################################
+#################### Tabelas ######################
+###################################################
+
+## Chamar tabela (S?? depois que filtrar pelo r2 e eqtls)
+Amygdala_gtex_novo_so_eqtls <- read.delim("./novo_PrediXcan/Software/results/Amygdala_gtex_novo_sem_impu_predicted_expression.txt")
+
+Brainseq_prefrontal <- read.delim("./Dados BrainSeq/Brainseq_DLPFC_predicted_expression.txt")
+
+colnames(Ids_Brainseq_expressao)
+
+Ids_Brainseq_expressao <- join_all(list(Brainseq_prefrontal, Colunas_pheno_exter), by = "IID", type = "right")
+
+colnames(mydata_TickAvg_QC)
+TickAvg_INPD <- subset(mydata_TickAvg_QC, select = c(77, 75, 62, 28, 1 ))
+
+names(TickAvg_INPD)[names(TickAvg_INPD) == "subjectid"] <- "IID"
+
+Banco_exter_genes_tick <- join_all(list(sem_na_banco_total_exter, TickAvg_INPD), by = "IID", type = "right")
+
+sem_na_Banco_exter_genes_tick <- na.omit(Banco_exter_genes_tick)
+
+## Filtrar genes finais 
+
+genes_finais <- with(Amygdala_gtex_novo_so_eqtls, data.frame(FID, IID,ENSG00000213760.6, ENSG00000188599.13, ENSG00000136327.6, ENSG00000104327.3,ENSG00000136270.9))
+
+
+## connect to db Amygdala v7 predictdb: http://predictdb.org/
+con <- dbConnect(drv=RSQLite::SQLite(), dbname="./novo_PrediXcan/Software/weights/gtex_v7_Brain_Amygdala_imputed_europeans_tw_0.5_signif.db")
+con_Brainseq <- dbConnect(drv=RSQLite::SQLite(), dbname="../../Downloads/DLPFC_oldMetax.db/Downloads/CMC_DLPFC-PrediXcan_Models/DLPFC_oldMetax.db ")
+
+## bin da nossa amostra 
+INPD_chr_semC.bim <- read.delim("./genotype/INPD_2020_final.bim", header=FALSE)
+names(INPD_chr_semC.bim) <- c("chr", "rsid", "null", "cordenada", "all1", "all2")
+
+###################################################
+########## eQTLs totais na nossa amostra ##########
+###################################################
+
+### Salvar tabela que eu quero: 
+
+## weights ??? the weights for the snps in the linear models. The column names with descriptions are listed here:
+## rsid ??? The rsid number for the snp from dbSNP build 142
+## gene ??? The ensembl ID of the gene for which the snp weight is predicting expression
+## weight ??? The weight value for the snp in the model
+## ref_allele ??? The reference allele of the snp
+## eff_allele ??? The effect allele of the snp
+
+Amyg_db <- dbReadTable(con,"weights")
+Dorso_db <- dbReadTable(con_Brainseq,"weights")
+colnames(Amyg_db)
+head(Amyg_db)
+
+## extra ??? holds info about each linear model for predicting the transcriptome in the tissue. The column names with descriptions are listed here:
+  
+#gene ??? The ensembl ID of the gene
+#genename ??? The gene???s HUGO symbol
+#pred.perf.R2 ??? The cross-validated R2 value found when training the model.
+#n.snps.in.model ??? The number of cissnps used to predict the expression level of the gene
+#pred.perf.pval ??? The p-value of the correlation between cross-validated prediction and observed expression
+#pred.perf.qval ??? The q-value obtained when analyzing the initial distribution of p-values. The models in these databases have been filtered to only include results that are significant at a FDR of less than 5%.
+
+Amyg_extra <- dbReadTable(con,"extra")
+Dorso_extra <- dbReadTable(con_Brainseq,"extra")
+colnames(Amyg_extra)
+head(Amyg_extra)
+
+## Filtrar pelo R2 ##   
+newdata <- Dorso_extra[which(Dorso_extra$pred.perf.R2 > 0.1),]
+so_sp <- Banco_so_estados[which(Banco_so_estados$state > 1),]
+
+
+
+colnames(newdata)
+names(newdata)[names(newdata) == "gene"] <- "V1"
+
+### merge da tabela das eqtls gtex e bim ###
+
+mergidos_eqtls <- merge(Dorso_db, INPD_chr_semC.bim, by="rsid", type="full")
+names(newdata)[names(newdata) == "gene"] <- "V1"
+
+head(INPD_chr_semC.bim)
+
+## ordenar ## ajus
+Arrange_por_gene <- arrange(mergidos_eqtls,(gene))
+
+## frequencia de eqlts na amostra 
+table_genes <-  as.data.frame(t(table(Arrange_por_gene$gene)))
+names(table_genes)[names(table_genes) == "Var2"] <- "V1"
+
+Amygdala_gtex <- read.delim("./Amygdala_gtex_novo_sem_impu_predicted_expression.txt")
+t_gene_pred <- as.data.frame(t(BrainSeq_genes))
+
+teste <- as.data.frame(row.names(t_gene_pred))
+names(teste)[names(teste) == "row.names(t_gene_pred)"] <- "V1"
+
+so_os_genes_comeqtls <- merge(teste, table_genes, by="V1", type="full")
+
+## Merge dos filtrados pelo R2 pelos presentes na amostra 
+filtrados_r2_so_eqtls <- merge(so_os_genes_comeqtls, newdata , by="V1", type="full")
+
+## Salvar a tabela e filtar no PrediXcan ##
+
+so_0_6 <- subset(filtrados_r2_so_eqtls, select = c (1))
+write.table(filtrados_r2_so_eqtls, "./Tabela_genes_R2_eqtls ", sep="\t", col.names = T, row.names = F, quote = F)
+
+write.table(so_0_6, "./so_esses_genes_0.6.txt ", sep="\t", col.names = T, row.names = F, quote = F)
+
+
+eqlts_mais_de2 <- filtrados_r2_so_eqtls[which(filtrados_r2_so_eqtls$Freq > 1),]
+
+### Distribuicao variaveis?
+
+ggplot(Banco_feno_covar, aes(x=dwb_fear_fl.1)) + geom_density()
+
+
+
+###################################################
+######### Variaveis Clinicas e covs ###############
+###################################################
+
+## Chamar PCA 
+library(readxl)
+pca <- read_excel("./pca.xlsx")
+PCA_subset <- subset(pca, select = c(2:12))
+names(PCA_subset) <- c("IID", "PC1", "PC2", "PC3", "PC4", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10")
+
+## Chamar mediation do INPD
+df_clinico <- read.spss("./Martins_HRC_20192502mediation", to.data.frame=TRUE, use.value.labels = FALSE, fileEncoding="latin1" )
+
+## Selecionar as colunas certas 
+Banco_inpd <- subset(df_clinico, select = c(2, 4, 3, 6, 7, 31, 32, 33, 34))
+colnames(Banco_inpd)
+
+## Separar W0 e W1 
+W0 <- Banco_inpd[!(Banco_inpd$redcap_event_name=="wave1_arm_1"),]
+W1 <- Banco_inpd[!(Banco_inpd$redcap_event_name=="wave0_arm_1"),]
+
+## Juntar as duas em colunas diferentes 
+Fase1_2 <- join_all(list(W0, W1), by = "subjectid", type = )
+colnames(Fase1_2)
+
+## Duplicou tirar as colunas repetidas (os.1 sao os da W1)
+merge_W0_W1<- subset(Fase1_2, select = c(1, 2, 3, 4, 5, 6,7,8,9,13,14,15,16,17))
+Banco_feno_covar <- subset(merge_W0_W1, select = c(2, 3, 4, 5, 6, 7, 8, 10,11,12,13,14))
+colnames(merge_W0_W1)
+
+## merge com o PCA (pelo PCA s?? quero quem tem geno)
+names(merge_W0_W1)[names(merge_W0_W1) == "subjectid"] <- "IID"
+Banco_feno_covar <- join_all(list(merge_W0_W1, pca), by = "IID", type = "right")
+
+## genero vira fator 
+merge_W0_W1$gender <- as.factor(merge_W0_W1$gender)
+
+## Ordenar ids na tabela dos genes (estava fora da ordem e nao ficcam pareados)  
+
+df2_genes_ordenados <- arrange(genes_finais,(IID))
+Banco_feno <- arrange(Banco_feno_covar,(subjectid))
+
+## Merge com a tabela da genotipagem (para ter certeza que os ids sao os mesmos) 
+df_mergidos_new <-merge(x=Amygdala_gtex_novo_so_eqtls,y=merge_W0_W1,by="IID",all.x=TRUE)
+
+## Tirar o fenotipo da tabela da genotipagem 
+IDs_identicos <- subset(df_mergidos_new, select = c(1, 1335:1356))
+
+## Coluna ID vira rowname (Para n??o ter fator no lm )
+gene_Pred_Amygdala <- subset(df2_genes_ordenados , select = -c(IID, FID))
+rownames(gene_Pred_Amygdala)
+
+rownames(IDs_identicos) <- IDs_identicos$IID
+
+str(gene_Pred_Amygdala) ## Todos numericos 
+str(IDs_identicos) ## Gender fator, outros numericos
+
+# Pcs n??o ficaram numericos, mudar !! 
+IDs_identicos$PC1 <- as.numeric(IDs_identicos$PC1)
+IDs_identicos$PC2 <- as.numeric(IDs_identicos$PC2)
+
+## Testa se os IDs entre as duas tabelas sao iguais 
+identical(rownames(gene_Pred_Amygdala), row.names(IDs_identicos))
+
+###################################################
+######### Regressoes Lineares !!!!!!###############
+###################################################
+
+## Regressoes com apply 
+## Modelo Linear com Variavel clinica (fator P/internalizante) e covs (PC1, PC2, gender, age)
+## Cuidado nao pode ter nehum fator na tabela de genes, so numericos !!! 
+## fenotipo ~ pedixcan + covs (Usei PC1, PC2, sexo e idade como covs)
+
+str(gene_Pred_Amygdala)
+str(Banco_feno_covar)
+
+## Amigdala W0 (distress/fear/p)
+
+Amygdala_distress_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_dist_fl ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+Amygdala_fear_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_fear_fl ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+Amygdala_p_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_p_fl ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+
+## Amigdala W1 (distress/fear/p)
+
+Amygdala_distress_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_dist_fl.1 ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+Amygdala_fear_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_fear_fl.1 ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+Amygdala_p_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(IDs_identicos$dwb_p_fl.1 ~ x + IDs_identicos$age + IDs_identicos$gender + IDs_identicos$PC1 + IDs_identicos$PC2)})
+
+###################################################
+######### Salvar tabelas da regressao #############
+###################################################
+
+## Usar o summary para conseguir visualizar as listas que saem do output   
+## Valor de F (checa se e um evento aleatorio ou nao < 0,05)
+# Prepara tabela com o B, numero de observacoees e valor de p para cada variavel
+
+## Amygdala W0 (distress)
+estimate<- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_distress_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_distress_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+## Amygdala W0 (fear)
+estimate<- as.data.frame(sapply(Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_fear_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_fear_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+## Amygdala W1 (Distress)
+estimate<- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_distress_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_distress_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+## Amygdala W1 (Fear)
+estimate<- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_fear_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_fear_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+## Fator P W0 
+estimate<- as.data.frame(sapply(Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$r.squared)))
+
+
+p_ajustado_W0_P <- as.data.frame(p.adjust(tabela_final_Amyg_P_W0$pvals, method = "fdr", n= 2362))
+
+## Merge para tabela final 
+tabela_final_Amyg_P_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_P_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+## Fator P W1 
+estimate<- as.data.frame(sapply(Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_P_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_P_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+
+###################################################
+############# Multiplas comparacoes ###############
+###################################################
+
+## Multiplas compara????es por fdr 
+
+##W0
+pfdr_dist_w0 <- p.adjust(tabela_final_Amyg_distress_W0$pvals, method = "fdr", n= 1333)
+pfdr_fear_w0 <- p.adjust(tabela_final_Amyg_fear_W0$pvals, method = "fdr", n= 1333)
+pfdr_p_W0 <- p.adjust(tabela_final_Amyg_P_W0$pvals, method = "fdr", n= 1333)
+
+Amygdala_distress_W0_pfdr_linear <- cbind(tabela_final_Amyg_distress_W0, pfdr_dist_w0)
+Amygdala_fear_W0_pfdr_linear <- cbind(tabela_final_Amyg_fear_W0, pfdr_fear_w0)
+Amygdala_p_W0_pfdr_linear <- cbind(tabela_final_Amyg_P_W0, pfdr_p_W0)
+
+##W1
+pfdr_dist_w1 <- p.adjust(tabela_final_Amyg_distress_W1$pvals, method = "fdr", n= 1333)
+pfdr_fear_w1 <- p.adjust(tabela_final_Amyg_fear_W1$pvals, method = "fdr", n= 1333)
+pfdr_p_W1 <- p.adjust(tabela_final_Amyg_P_W1$pvals, method = "fdr", n= 1333)
+
+Amygdala_distress_W1_pfdr_linear <- cbind(tabela_final_Amyg_distress_W1, pfdr_dist_w1)
+Amygdala_fear_W1_pfdr_linear <- cbind(tabela_final_Amyg_fear_W1, pfdr_fear_w1)
+Amygdala_p_W1_pfdr_linear <- cbind(tabela_final_Amyg_P_W1, pfdr_p_W1)
+
+##Salvar 
+write.table(Amygdala_distress_W0_pfdr_linear, "./Amygdala_distress_W0_pfdr_linear ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(Amygdala_fear_W0_pfdr_linear, "./Amygdala_fear_W0_pfdr_linear ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(Amygdala_p_W0_pfdr_linear, "./Amygdala_p_W0_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+
+write.table(Amygdala_distress_W1_pfdr_linear, "./Amygdala_distress_W1_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(Amygdala_fear_W1_pfdr_linear, "./Amygdala_fear_W1_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(Amygdala_p_W1_pfdr_linear, "./Amygdala_p_W1_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+
+
+#####################################
+######### Mediacao ##################
+#####################################
+library(haven)
+
+## Merge com o THBIAS
+thbiaspara_adrielle <- read_sav("~/Downloads/thbiaspara adrielle.sav")
+colnames(thbiaspara_adrielle)
+names(thbiaspara_adrielle)[names(thbiaspara_adrielle) == "subjectid"] <- "IID"
+names(Banco_feno)[names(Banco_feno) == "subjectid"] <- "IID"
+
+Banco_total_thbias <- join_all(list(Banco_total_thbias, genes_finais), by = "IID", type = "right")
+
+
+## Modelo com distress ENSG00000254333.1 top gene moderado por ameaca   
+
+model_teste_expre_dot <- '
+tTBIAS ~ a*ENSG00000213760.6+ gender +state  
+dwb_fear_fl.1 ~ c*ENSG00000213760.6 + gender + state+ b* tTBIAS  
+indirect:= a*b
+total:= c+ (a*b) '
+
+fit_teste_Amigdala_dot <- sem(model_teste_expre_dot, data=Filtrado_sem_na, meanstructure=TRUE, se="bootstrap",bootstrap=1000)
+summary( fit_teste_Amigdala_dot, rsq=TRUE)
+
+
+colnames(so_distress_puro)
+        
+## So o que vamos usar
+Filtrado_so_2_genes <- subset(Banco_total_thbias, select = c(1, 143, 486, 572, 573, 580,581,593,594))
+
+## Tirar Na meu n caiu horrores 1459 
+
+Filtrado_sem_na <- na.omit(Banco_total_thbias)
+write_sav(Filtrado_sem_na, path = "./novo_PrediXcan/Banco_total_genes_final")
+
+## Efeito pelo mediation
+library(mediation)
+install.packages("mediation")
+
+model_mediator <- lm(tTBIAS ~ ENSG00000136327.6 + gender , data=Filtrado_sem_na)
+model_outcome <- lm(dwb_dist_fl.1 ~ ENSG00000136327.6 + tTBIAS + gender , data=Filtrado_sem_na)
+
+mediation_result <- mediate(model_mediator, model_outcome, sims = 10000, treat ="ENSG00000136327.6", mediator = "tTBIAS",  boot=TRUE )
+
+summary(mediation_result)
+plot(mediation_result)
+
+##### gene fear
+model_mediator <- lm(ENSG00000136932.9 ~ tHBIAS + gender + state, data=Filtrado_sem_na)
+model_outcome <- lm(dwb_fear_fl.1 ~ ENSG00000136932.9 + tHBIAS + gender + state, data= Filtrado_sem_na)
+
+mediation_result <- mediate(model_mediator, model_outcome, sims = 10000,treat ="ENSG00000136932.9", mediator ="tHBIAS" )
+
+summary(mediation_result)
+plot(mediation_result)
+
+filltrado_sem_na) + gender + state, data= Filtrado_sem_na)
+
+model_mediator <- lm(tTBIAS ~ ENSG00000136932.9 + gender + state, data=Filtrado_sem_na)
+model_outcome <- lm(dwb_fear_fl.1 ~ tTBIAS + ENSG00000136932.9 + gender + state, data= Filtrado_sem_na)
+
+
+## Pearson distress
+cor.test(Banco_total_thbias$ENSG00000254333.1, Banco_total_thbias$dwb_dist_fl.1, method = "pearson")
+
+cor.test(Banco_total_thbias$ENSG00000136932.9, Banco_total_thbias$dwb_fear_fl.1, method = "pearson")
+
+library(ggpubr)
+
+ggscatter(Banco_total_thbias, x= "ENSG00000254333.1", y= "dwb_dist_fl.1", add ="reg.line", conf.int = TRUE, cor.coef = TRUE, cor.method = "spearman", xlab ="NDST1-AS1 gene", ylab = "Dawba Distress W1" )
+ggscatter(Banco_total_thbias, x= "ENSG00000136932.9", y= "dwb_fear_fl.1", add ="reg.line", conf.int = TRUE, cor.coef = TRUE, cor.method = "pearson", xlab ="TRMO gene", ylab = "Dawba Fear W1" )
+
+
+## Plotar gene por psicopatologia, pode ser por cor (com alguma cat legal)
+
+
+ggplot(data = Filtrado_sem_na, mapping = aes(x = ENSG00000149089.8  , y =  dwb_dist_fl.1, color= PC1)) + 
+  geom_jitter() + # Use geom_jitter instead of geom_point, otherwise the points are drawn over each other
+  geom_smooth(method='lm', se=FALSE)
+
+
+write.table(Filtrado_sem_na, "./Banco_11_genes_feno ", sep="\t", col.names = T, row.names = F, quote = F)
+
+#### Tudo novo de novo (Espero que pela ultima vez senhor !!!!)
+## 11 genes com 0.6 
+colnames(Filtrado_sem_na)
+# ENSG00000149089.8
+# ENSG00000165171.6 
+# ENSG00000177236.3 
+# ENSG00000188002.6 
+# ENSG00000197728.5
+# ENSG00000221923.4
+# ENSG00000226232.4 
+# ENSG00000226686.3 
+# ENSG00000236682.1 
+# ENSG00000237438.2
+# ENSG00000267594.5
+
+model_mediator <- lm(ENSG00000267594.5 ~ tHBIAS + gender + state, data=Filtrado_sem_na)
+model_outcome <- lm(dwb_dist_fl.1 ~  ENSG00000267594.5  + tHBIAS + gender + state, data=Filtrado_sem_na)
+mediation_result <- mediate(model_mediator, model_outcome, sims = 10000, treat = "ENSG00000267594.5" , mediator = "tHBIAS" )
+
+print(mediation_result)
+summary(mediation_result)
+plot(mediation_result)
+
+write_sav(Filtrado_sem_na, "Banco_so_11.sav")
+plot(Filtrado_sem_na$state)
+str(Filtrado_sem_na)
+Filtrado_sem_na$state <- as.factor(Filtrado_sem_na$state)
+
+library(psych)
+qchisq(Filtrado_sem_na$state, Filtrado_sem_na$dwb_dist_fl.1)
+
+t.test(Filtrado_sem_na$gender, Filtrado_sem_na$dwb_dist_fl.1)
+Filtrado_sem_na$state <-as.factor(Filtrado_sem_na$state)
+describe(Filtrado_sem_na)
+
+ Transpor a tabela pra filtrar pelas eqltls do banco ## 
+t_gene_Pred <- as.data.frame(t(Amygdala_gtex_novo_sem_impu_predicted_expression))
+
+teste_filtrado <- subset(t_gene_Pred, select = c("V1"))
+
+regressao_Amig_distress_W0. <- read.csv("~/Documents/Adrielle/regressao_Amig_distress_W0 ")
+
+head(regressao_Amig_distress_W0.)
+
+names(table_genes_db)[names(table_genes_db) == "freq"] <- "freq_db"
+
+freq_eqtls <- merge(table_genes, table_genes_db, by="Var2", type="left")
+head(table_genes)
+
+freq_eqtls$porc <- freq_eqtls$Freq.x/freq_eqtls$Freq.y
+
+names(eqtls_todos_chr) <- c("rsid")
+
+com_1TG <- merge(eqtls_todos_chr,Amyg_db, by="rsid", type="full")
+
+### eqtls dos top genes 
+Filtrados_snps <- Amyg_db[Amyg_db$gene == "ENSG00000116198.8", ]
+Filtrados_snps_1 <- Amyg_db[Amyg_db$gene == "ENSG00000243678.7",]                          
+Filtrados_snps_2 <- Amyg_db[Amyg_db$gene == "ENSG00000136270.9",]  
+
+colnames(Filtrados_snps)
+names(eqtls_todos_chr)[names(eqtls_todos_chr) == "V1"] <- "rsid"
+mergidos_eqtls <- merge(Filtrados_snps, eqtls_todos_chr, by="rsid", type="left")
+mergidos_eqtls_1 <- merge(Filtrados_snps_1, eqtls_todos_chr, by="rsid", type="left")
+mergidos_eqtls_2 <- merge(Filtrados_snps_2, eqtls_todos_chr, by="rsid", type="left")
+
+write.table(mergidos_eqtls, "./W1_fear ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(mergidos_eqtls_1, "./W1_fear_1 ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(mergidos_eqtls_2, "./W1_fear_2 ", sep="\t", col.names = T, row.names = F, quote = F)
+
+### frequencia das eqtls na nossa amostra 
+names(QC.bim) <- c("chr", "rsid", "null", "cordenada", "all1", "all2")
+mergidos_eqtls <- merge(Amyg_db, QC.bim, by="rsid", type="full")
+Arrange_por_gene <- arrange(mergidos_eqtls,(gene))
+
+table_genes <-  as.data.frame(t(table(Arrange_por_gene$gene)))
+
+table_genes_db <-  as.data.frame(t(table(Amyg_db$gene)))
+
+names(table_genes_db)[names(table_genes_db) == "freq"] <- "freq_db"
+
+freq_eqtls <- merge(table_genes, table_genes_db, by="Var2", type="left")
+head(table_genes)
+
+freq_eqtls$porc <- freq_eqtls$Freq.x/freq_eqtls$Freq.y
+
+names(eqtls_todos_chr) <- c("rsid")
+
+com_1TG <- merge(eqtls_todos_chr,Amyg_db, by="rsid", type="full")
+
+table_genes_db_1TG <-  as.data.frame(t(table(Amyg_db$gene)))
+
+freq_eqtls_1TG <- merge(table_genes, table_genes_db_1TG, by="Var2", type="left")
+
+freq_eqtls_1TG$porc <- freq_eqtls_1TG$Freq.x/freq_eqtls_1TG$Freq.y
+
+mergidos_eqtls_todos <- merge(Amyg_db, QC.bim, by="rsid", type="full")
+
+write.table(freq_eqtls_1TG, "./Frequencia_eqtls_no1G", sep="\t", col.names = T, row.names = F, quote = F)
+
+## Chamar tabela de expressao predita  
+gene_Pred_Amygdala <- read.table("./Predixcan/Software/results/Amygdala_sem_imputacao_predicted_expression.txt", sep = "\t", header = TRUE)
+gene_Pred_Amygdala <- read.table("./Amygdala_gtex_novo_sem_impu_predicted_expression.txt", sep = "\t", header = TRUE)
+gene_Pred_Hipo <- read.table("./Predixcan/Software/results/Brain_Hypothalamus_predicted_expression.txt", sep = "\t", header = TRUE)
+gene_Pred_Amygdala <- read.table("./Predixcan/Software/results/Brain_Amygdala_mashr_inpd_predicted_expression.txt", sep = "\t", header = TRUE)
+
+## Transpor a tabela 
+t_gene_Pred <- as.data.frame(t(gene_Pred))
+t_gene_Pred <- as.data.frame(t(gene_Pred_Amygdala))
+teste_filtrado <- subset(t_gene_Pred, select = c("V1"))
+write.table(teste_filtrado, "./todos os genes ", sep="\t", col.names = T, row.names = T, quote = F)
+
+teste <- as.data.frame(teste_filtrado[-c (1, 2), ])
+colnames(teste_filtrado) <- c("ensembl_id")
+
+## Separar em duas colunas pelo ponto para tirar o numero do transcrito 
+sem_ponto <- separate(data = teste_filtrado, col = ensembl_id, into = c("ensembl_id", "right"), sep = "\\.")
+ensemblGenes <- sem_ponto[, -2] 
+
+##Teste tabela resultados 
+colnames(resultados)
+GENES_RESULTADOS <- subset(resultados, select = c("gene"))
+colnames(GENES_RESULTADOS) <- c("ensembl_id")
+genes_resultados2 <- separate(data = GENES_RESULTADOS, col = ensembl_id, into = c("ensembl_id", "right"), sep = "\\.")
+ensemblGenes <- genes_resultados2[, -2] 
+convertido_ids_gene <- select(EnsDb.Hsapiens.v86, key=ensemblGenes, columns=c("SYMBOL"), keytype="GENEID")
+names(convertido_ids_gene)[names(convertido_ids_gene) == "GENEID"] <- "gene"
+total_resultados <- merge(resultados, convertido_ids_gene, by="gene")
+
+## Converter ensembl_ids para gene
+mart<- useDataset("hsapiens_gene_ensembl", useMart("ENSEMBL_MART_ENSEMBL"))
+convertido_ids_gene <- select(EnsDb.Hsapiens.v86, key=ensemblGenes, columns=c("SYMBOL"), keytype="GENEID")
+
+## merge nome do gene com id transcrito ####Pensar melhor onde fazer isso 
+colnames(convertido_ids_gene)
+names(gene_Pred_Amygdala)[names(gene_Pred_Amygdala) == "V1"] <- "IID"
+names(convertido_ids_gene)[names(convertido_ids_gene) == "GENEID"] <- "subjectid"
+
+merge_simbol <- merge(t_gene_Pred, convertido_ids_gene,by="subjectid")
+
+## IDs dos pacientes para o merge com o banco 
+colnames(gene_Pred)
+names(Sem_w1)[names(Sem_w1) == "subjectid"] <- "IID"
+
+## Chamar PCA 
+PCA <- read.table("./PrediXcan/Software/genotype/INPD_PCA_pru.eigenvec", header = FALSE)
+PCA <- read.table("./pca.txt", header = TRUE)
+PCA_subset <- subset(PCA, select = c(2:12))
+names(PCA_subset) <- c("IID", "PC1", "PC2", "PC3", "PC4", "PC5", "PC6", "PC7", "PC8", "PC9", "PC10")
+
+## Chamar .sav do INPD
+df <- read.spss("./Martins_HRC_20192502.sav", to.data.frame=TRUE, use.value.labels = FALSE, fileEncoding="latin1" )
+
+## Selecionar as colunas certas 
+Banco_inpd <- subset(df, select = c(2, 4, 3, 6, 7, 31, 32, 33, 34))
+colnames(Banco_inpd)
+
+## Separar W0 e W1 
+W0 <- Banco_inpd[!(Banco_inpd$redcap_event_name=="wave1_arm_1"),]
+W1 <- Banco_inpd[!(Banco_inpd$redcap_event_name=="wave0_arm_1"),]
+
+
+## Juntar as duas em colunas diferentes 
+Fase1_2 <- join_all(list(W0, W1), by = "subjectid")
+
+
+## Duplicou tirar as colunas repetidas
+merge_W0_W1<- subset(Fase1_2, select = c(1, 2, 3, 4, 5, 6,7,8,9,12,13,14,15))
+merge_W0_W1<- subset(merge_W0_W1, select = c(2, 3, 4, 5, 6, 7, 8, 10,11,12,13))
+
+## merge com o PCA 
+names(merge_W0_W1)[names(merge_W0_W1) == "subjectid"] <- "IID"
+Banco_feno_covar <- join_all(list(merge_W0_W1, pca), by = "IID", type = "right")
+write.table(Banco_feno_covar, "./Banco_INPD_covar.txt ", sep="\t", col.names = T, row.names = F, quote = F)
+
+
+Banco_feno <-merge(x=merge_W0_W1,y=pca,by="IID",all.x=TRUE)
+
+## Ordenar ids na tabela dos genes (estava fora da ordem e nao ficcam pareados)  
+df2<- arrange(gene_Pred_Amygdala,(IID))
+df_antigo <- arrange(Amygdala_sem_imputacao_predicted_expression,(IID))
+
+## Merge com a tabela da genotipagem (para ter certeza que os ids sao os mesmos) 
+df_mergidos_new<-merge(x=df_antigo,y=Banco_feno,by="IID",all.x=TRUE)
+
+library(haven)
+write_sav(df, "Banco_Amyg_completo.sav")
+
+
+## Tirar o fenotipo da tabela da genotipagem 
+IDs_identicos <- subset(df_mergidos_new, select = c(1, 2365:2384))
+
+
+## Testa se os IDs entre as duas tabelas sao iguais 
+identical(rownames(gene_Pred_Amygdala), row.names(IDs_identicos))
+
+## Coluna ID vira rowname (Para ter certeza que so vai ficar os genes na tabela para o lm)
+gene_4 <- subset(Amygdala_gtex_novo_sem_impu_predicted_expression, select = -c(IID, FID))
+rownames(gene_Pred_Amygdala) <- gene_Pred_Amygdala$IID
+
+gene_pred <- subset(Amygdala_gtex_novo_sem_impu_predicted_expression, select = -c(IID, FID))
+rownames(Amygdala_gtex_novo_sem_impu_predicted_expression) <- Amygdala_gtex_novo_sem_impu_predicted_expression$IID
+gene_Pred_Amygdala <- subset(gene_Pred_Amygdala, select = -c(IID, FID))
+
+rownames(gene_Pred_Amygdala) <- gene_Pred_Amygdala$IID
+rownames(IDs_identicos)
+row.names(Banco_feno_covar) <- Banco_feno_covar$IID
+
+row.names(gene_pred)
+## Modelo Linear Apply um por um  
+
+## fenotipo ~ pedixcan + covs (Usei PC1, PC2, sexo e idade como covs)
+
+## Amigdala W0 (distress/fear/p)
+Amygdala_distress_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$dwb_dist_fl ~ x + gene_pred$age + gene_pred$PC1 + gene_pred$PC2 + gene_pred$gender )})
+Amygdala_fear_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$dwb_fear_fl ~ x + gene_pred$age +gene_pred$PC1 + gene_pred$PC2 +gene_pred$gender )})
+Amygdala_p_W0 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$dwb_p_fl ~ x + gene_pred$age +gene_pred$PC1 + gene_pred$PC2 +gene_pred$gender )})
+
+
+## Amigdala W1 (distress/fear/p)
+Amygdala_distress_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$dwb_dist_fl.1 ~ x + gene_pred$age +gene_pred$PC1 + gene_pred$PC2 +gene_pred$gender )})
+Amygdala_fear_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$  ~ x + gene_pred$age +gene_pred$PC1 + gene_pred$PC2 +gene_pred$gender )})
+Amygdala_p_W1 <- apply(gene_Pred_Amygdala, 2, FUN = function(x){ lm(gene_pred$dwb_p_fl.1 ~ x + gene_pred$age +gene_pred$PC1 + gene_pred$PC2 +gene_pred$gender )})
+
+
+## Usar o summary para conseguir visualizar as listas que saem do output 1 por gene   
+
+summary(Amygdala_distress$ENSG00000001561.6)$coefficients[,4]
+summary(Amygdala_distress$ENSG00000001561.6)
+summary(x)$coefficients[,4]
+summary(Amygdala_distress$ENSG00000001561.6$model) 
+
+## Valor de F (checa se e um evento aleatorio ou nao < 0,05)
+# Prepara tabela com o B, n??mero de observa????es e valor de p para cada vari??vel
+
+## Amygdala W0 (distress)
+estimate<- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_distress_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_distress_W0 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_distress_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_distress_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+write.table(tabela_final_Amyg_distress_W0, "regressao_Amig_distress_W0 ")
+
+## Amygdala W0 (fear)
+estimate<- as.data.frame(sapply(Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_fear_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_fear_W0 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_fear_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_fear_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+write.table(tabela_final_Amyg_fear_W0 , "regressao_Amig_fear_W0 ")
+
+## Amygdala W1 (Distress)
+estimate<- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_distress_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_distress_W1 , function(x)(summary(x)$r.squared)))
+## Merge para tabela final 
+tabela_final_Amyg_distress_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_distress_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+write.table(tabela_final_Amyg_distress_W1, "regressao_Amig_distress_W1 ")
+
+## Amygdala W1 (Fear)
+estimate<- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_fear_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_fear_W1 , function(x)(summary(x)$r.squared)))
+## Merge para tabela final 
+tabela_final_Amyg_fear_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_fear_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+p_ajustado_W1_fear <- as.data.frame(p.adjust(tabela_final_Amyg_distress_W0$pvals, method = "fdr"))
+
+## Fator P W0 
+estimate<- as.data.frame(sapply(Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_p_W0 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_p_W0 , function(x)(summary(x)$r.squared)))
+
+
+p_ajustado_W0_P <- as.data.frame(p.adjust(tabela_final_Amyg_P_W0$pvals, method = "fdr", n= 2362))
+
+## Merge para tabela final 
+tabela_final_Amyg_P_W0 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_P_W0) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+write.table(tabela_final_Amyg_P_W0, "regressao_Amig_p_W0 ")
+
+
+## Multiplas compara????es
+
+##W0
+pfd_dist_w0 <- p.adjust(regressao_Amig_distress_W0.$pvals, method = "fdr", n= 2362)
+pfd_fear_w0 <- p.adjust(regressao_Amig_fear_W0.$pvals, method = "fdr", n= 2362)
+pfd_p_W0 <- p.adjust(regressao_Amig_p_W0.$pvals, method = "fdr", n= 2362)
+
+Amygdala_distress_W0_pfdr_linear <- cbind(regressao_Amig_distress_W0., pfd_dist_w0)
+Amygdala_fear_W0_pfdr_linear <- cbind(regressao_Amig_fear_W0., pfd_fear_w0)
+Amygdala_p_W0_pfdr_linear <- cbind(regressao_Amig_p_W0., pfd_p_W0)
+
+##W1
+pfd_dist_w1 <- p.adjust(regressao_Amig_distress_W1.$pvals, method = "fdr", n= 2362)
+pfd_fear_w1 <- p.adjust(regressao_Amig_fear_W1.$pvals, method = "fdr", n= 2362)
+pfd_p_W1 <- p.adjust(regressao_Amig_p_W1.$pvals, method = "fdr", n= 2362)
+
+Amygdala_distress_W1_pfdr_linear <- cbind(regressao_Amig_distress_W1., pfd_dist_w1)
+Amygdala_fear_W1_pfdr_linear <- cbind(regressao_Amig_fear_W1., pfd_fear_w1)
+Amygdala_p_W1_pfdr_linear <- cbind(regressao_Amig_p_W1., pfd_p_W1)
+
+##Salvar 
+write.table(Amygdala_distress_W0_pfdr_linear, "./Amygdala_distress_W0_pfdr_linear ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(Amygdala_fear_W0_pfdr_linear, "./Amygdala_fear_W0_pfdr_linear ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(Amygdala_p_W0_pfdr_linear, "./Amygdala_p_W0_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+
+write.table(Amygdala_distress_W1_pfdr_linear, "./Amygdala_distress_W1_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(Amygdala_fear_W0_pfdr_linear, "./Amygdala_fear_W0_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+write.table(Amygdala_p_W1_pfdr_linear, "./Amygdala_p_W1_pfdr_linear ", sep="\t", col.names = T, row.names = F, quote = F)
+
+
+
+head(Amygdala_distress_W1_pfdr_linear)
+
+
+
+
+
+
+
+mydata.cor = cor(Filtrado_sem_na, method = c("pearson"))
+
+##            
+
+
+  
+  
+install.packages("corrplot")
+library(corrplot)
+
+corrplot(mydata.cor)
+
+## Fator P W1 
+estimate<- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,1])))
+SE <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,2])))
+t <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,3])))
+pvals <- as.data.frame(sapply(Amygdala_p_W1 , function(x)(summary(x)$coefficients[2,4])))
+r.sq <- as.data.frame(sapply( Amygdala_p_W1 , function(x)(summary(x)$r.squared)))
+
+## Merge para tabela final 
+tabela_final_Amyg_P_W1 <- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_final_Amyg_P_W1) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+write.table(tabela_final_Amyg_P_W1, "regressao_Amig_p_W1 ")
+
+### Salvar os resultados 
+write.table(tabela_final_Amyg_distress_W0, "./Amyg_distress_W0.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(tabela_final_Amyg_distress_W1, "./Amyg_distress_W1.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+
+write.table(tabela_final_Amyg_fear_W0, "./Amyg_fear_W0.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(tabela_final_Amyg_fear_W1, "./Amyg_fear_W1.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+
+write.table(tabela_final_Amyg_P_W0, "./Amyg_P_W0.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+write.table(tabela_final_Amyg_P_W1, "./Amyg_P_W1.txt ", sep="\t", col.names = T, row.names = T, quote = F)
+
+## Stepwise para os genes (Precisam estar na mesma tabela) 
+
+colnames(df)
+gene_pheno <- subset(df, select = -c(IID, FID))
+rownames(df) <- df$IID
+Modelo_na_mao <- lm( data = gene_pheno, gene_pheno$dwb_dist_fl ~ ENSG00000001561.6 + PC1 + PC2 + gender + age )
+
+x <- as.matrix(x)
+
+Modelo_1 <- lm(data = gene_pheno, gene_pheno$dwb_fear_fl ~    	+  PC1 + PC2 + gender + age)
+summary(Modelo_4)
+
+step( Modelo_4, direction = "both", scale =  0.5794)
+
+write.table(x, "./BIds ", sep="\t", col.names = F, row.names = F, quote = F)
+
+## Testando algumas coisas
+
+#Sum??rio dos resultados do modelo
+summary(Amygdala_distress$ENSG00000001561.6)
+
+#Teste para NORMALIDADE (valores de p > 0,05 indicam dados normais)
+shapiro.test(rstudent(Amygdala_distress$ENSG00000001561.6))   ##teste de shapiro wilk (normalidade)
+
+# An??lise visual para homogeneidade dos res??duos (visualmente eles devem se distribuir igualmente #abaixo e acima da linha)
+plot(rstudent(Amygdala_distress$ENSG00000001561.6) ~ fitted(Amygdala_distress$ENSG00000001561.6), pch = 19)
+abline(h = 0, lty = 2)
+
+#Visualiza????o gr??fica lty ?? o tipo da linha 1: linha cont??nua; 2: linha descont??nua
+plot(x~y)
+abline(Amygdala_distress$ENSG00000001561.6,lty=2)
+
+# Analise de residuos 
+par(mfrow = c (2,2))
+plot(Amygdala_distress$ENSG00000001561.6, which = c (1:4), phc = 20)
+
+# Teste de bartlett (homocedasticidade)
+bartlett.test(data= dados, x ~ y)
+
+lm_500_1 <- lm(formula = gene_pheno$dwb_dist_fl ~ ENSG00000007171.12 + ENSG00000010219.9 + 
+     ENSG00000068654.11 + ENSG00000070269.9 + ENSG00000097046.8 + 
+     ENSG00000100304.12 + ENSG00000101191.12 + ENSG00000104327.3 + 
+     ENSG00000105373.14 + ENSG00000107147.7 + ENSG00000108107.8 + 
+     ENSG00000108384.10 + ENSG00000110768.7 + ENSG00000113721.9 + 
+     ENSG00000116127.13 + ENSG00000117139.12 + ENSG00000117691.5 + 
+     ENSG00000119943.6 + ENSG00000119946.9 + ENSG00000122375.7 + 
+     ENSG00000122420.5 + ENSG00000122548.3 + PC2 + gender + age + 
+     ENSG00000105767.2, data = gene_pheno)
+
+lm_500_2 <- lm(formula = gene_pheno$dwb_dist_fl ~ ENSG00000123600.14 + ENSG00000124256.10 + 
+     ENSG00000126773.8 + ENSG00000128645.11 + ENSG00000129673.5 + 
+     ENSG00000131069.15 + ENSG00000134285.6 + ENSG00000134574.7 + 
+     ENSG00000139624.8 + ENSG00000140497.12 + ENSG00000140939.10 + 
+     ENSG00000141252.15 + ENSG00000142794.14 + ENSG00000144648.10 + 
+     ENSG00000148481.9 + ENSG00000149089.8 + ENSG00000152117.13 + 
+     ENSG00000154252.11 + ENSG00000154874.10 + ENSG00000155393.8 + 
+     ENSG00000155761.9 + ENSG00000161640.11 + ENSG00000161860.7 + 
+     PC1 + PC2 + gender + age + ENSG00000140400.10, data = gene_pheno)
+
+lm_500_3 <- lm(formula = gene_pheno$dwb_dist_fl ~ ENSG00000163631.12 + ENSG00000163703.13 + 
+     ENSG00000163795.9 + ENSG00000163913.7 + ENSG00000165389.6 + 
+     ENSG00000166435.11 + ENSG00000167264.13 + ENSG00000167670.11 + 
+     ENSG00000167720.8 + ENSG00000168038.6 + ENSG00000168393.8 + 
+     ENSG00000168811.2 + ENSG00000169515.5 + ENSG00000171714.10 + 
+     ENSG00000171773.2 + ENSG00000171777.11 + ENSG00000172167.3 + 
+     ENSG00000178852.11 + ENSG00000178927.12 + ENSG00000180535.3 + 
+     ENSG00000180902.12 + ENSG00000181396.8 + ENSG00000182685.3 + 
+     ENSG00000183287.9 + ENSG00000184840.7 + ENSG00000185250.11 + 
+     ENSG00000185324.17 + ENSG00000186806.5 + ENSG00000187068.2 + 
+     ENSG00000187116.9 + PC1 + PC2 + gender + age, data = gene_pheno)
+
+lm_500_4 <- lm(formula = gene_pheno$dwb_dist_fl ~ ENSG00000187595.10 + ENSG00000187624.7 + 
+                 ENSG00000188388.9 + ENSG00000196126.6 + ENSG00000197580.7 + 
+                 ENSG00000197599.8 + ENSG00000197734.4 + ENSG00000198468.3 + 
+                 ENSG00000204164.6 + ENSG00000204351.7 + ENSG00000204632.7 + 
+                 ENSG00000204673.6 + ENSG00000205583.9 + ENSG00000219481.6 + 
+                 ENSG00000220575.3 + ENSG00000225791.2 + ENSG00000226259.6 + 
+                 ENSG00000227124.4 + ENSG00000229180.4 + ENSG00000231351.2 + 
+                 ENSG00000232637.3 + ENSG00000232653.4 + ENSG00000236297.1 + 
+                 PC1 + PC2 + gender + age + ENSG00000233266.1 + ENSG00000198945.3, 
+               data = gene_pheno)
+
+lm_500_5 <- lm(formula = gene_pheno$dwb_dist_fl ~ ENSG00000242086.4 + ENSG00000243678.7 + 
+                 ENSG00000245156.1 + ENSG00000248469.1 + ENSG00000250182.2 + 
+                 ENSG00000253633.1 + ENSG00000253771.1 + ENSG00000255328.1 + 
+                 ENSG00000256594.3 + ENSG00000257511.1 + ENSG00000259433.2 + 
+                 ENSG00000259728.1 + ENSG00000260011.2 + ENSG00000260804.2 + 
+                 ENSG00000261098.1 + ENSG00000264538.2 + ENSG00000269990.1 + 
+                 ENSG00000270020.1 + ENSG00000270424.1 + ENSG00000270972.1 + 
+                 ENSG00000271324.1 + ENSG00000272221.1 + ENSG00000273142.1 + 
+                 ENSG00000273290.1 + PC2 + gender + age + ENSG00000270587.1 + 
+                 ENSG00000243709.1, data = gene_pheno)
+
+
+
+
+modelo_Amig_final_W0 <- lm(formula = total$dwb_dist_fl ~ +	ENSG00000001561.6+
+     PC1 + PC2 + gender + age + ENSG00000182685.3, data = total)
+summary(modelo_Amig_final_W0)
+
+Top_gene <- lm(formula = total$dwb_dist_fl ~ ENSG00000134285.6 + PC1 + PC2 + gender + age, data = total)
+summary(Top_gene)
+
+p_ajustado_top_gene <- as.data.frame(p.adjust(Top_gene$coefficients, method = "fdr"))
+p_ajustado_stepwise <- as.data.frame(p.adjust(modelo_Amig_final_W0$coefficients, method = "fdr"))
+
+#### W1 Amigdala
+lm_w1 <- lm(formula = df$dwb_dist_fl.1 ~ ENSG00000187624.7 + ENSG00000188388.9 + 
+              ENSG00000188690.8 + ENSG00000196071.3 + ENSG00000197275.8 + 
+              ENSG00000197734.4 + ENSG00000198468.3 + ENSG00000204673.6 + 
+              ENSG00000213753.6 + ENSG00000213760.6 + ENSG00000214425.2 + 
+              ENSG00000215018.5 + ENSG00000217801.5 + ENSG00000218510.3 + 
+              ENSG00000226038.4 + ENSG00000226180.2 + ENSG00000227124.4 + 
+              ENSG00000228106.1 + ENSG00000231351.2 + ENSG00000231690.2 + 
+              ENSG00000232637.3 + ENSG00000233927.4 + ENSG00000234584.1 + 
+              ENSG00000236485.1 + ENSG00000238198.1 + ENSG00000239389.3 + 
+              gender + ENSG00000187838.12, data = gene_pheno)
+
+lm_w1_2 <- lm(formula = gene_pheno$dwb_dist_fl.1 ~ ENSG00000162620.11 + 
+                ENSG00000163703.13 + ENSG00000164008.9 + ENSG00000164946.15 + 
+                ENSG00000165475.9 + ENSG00000167720.8 + ENSG00000167965.13 + 
+                ENSG00000168291.8 + ENSG00000169914.5 + ENSG00000170260.4 + 
+                ENSG00000172992.7 + ENSG00000176681.10 + ENSG00000176845.8 + 
+                ENSG00000177868.7 + ENSG00000178201.3 + ENSG00000178826.6 + 
+                ENSG00000178997.7 + ENSG00000179292.4 + ENSG00000179331.2 + 
+                ENSG00000180422.3 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000185294.5 + 
+                ENSG00000185829.11 + ENSG00000187010.14 + gender, data = gene_pheno)
+
+
+lm_w1_3 <- lm(formula = gene_pheno$dwb_dist_fl.1 ~ ENSG00000124275.10 + 
+     ENSG00000125885.9 + ENSG00000131845.10 + ENSG00000132109.8 + 
+     ENSG00000132313.10 + ENSG00000133739.11 + ENSG00000134574.7 + 
+     ENSG00000136270.9 + ENSG00000136327.6 + ENSG00000138316.6 + 
+     ENSG00000140104.9 + ENSG00000140382.10 + ENSG00000140497.12 + 
+     ENSG00000143891.12 + ENSG00000144597.9 + ENSG00000146530.7 + 
+     ENSG00000147509.9 + ENSG00000151632.12 + ENSG00000152749.7 + 
+     ENSG00000152926.10 + ENSG00000153956.11 + ENSG00000154781.11 + 
+     ENSG00000155093.13 + ENSG00000155761.9 + ENSG00000156304.10 + 
+     ENSG00000157326.14 + ENSG00000160953.10 + ENSG00000160961.7 + 
+     ENSG00000161640.11 + PC1 + gender + ENSG00000143862.3, data = gene_pheno)
+
+
+lm_w1_4 <- (formula = gene_pheno$dwb_dist_fl.1 ~ ENSG00000058866.10 + 
+     ENSG00000065268.6 + ENSG00000066651.13 + ENSG00000072864.8 + 
+     ENSG00000100376.7 + ENSG00000100429.13 + ENSG00000100505.9 + 
+     ENSG00000105373.14 + ENSG00000108001.9 + ENSG00000108272.9 + 
+     ENSG00000108828.11 + ENSG00000111077.13 + ENSG00000115266.7 + 
+     ENSG00000116198.8 + gender, data = gene_pheno)
+
+modelo_Amig_final_W1_STEP <-  lm(formula = total$dwb_dist_fl.1 ~ ENSG00000187624.7 + ENSG00000188388.9 + 
+                              ENSG00000188690.8 + ENSG00000196071.3 + ENSG00000197275.8 + 
+                              ENSG00000197734.4 + ENSG00000198468.3 + ENSG00000204673.6 + 
+                              ENSG00000213753.6 + ENSG00000213760.6 + ENSG00000214425.2 + 
+                              ENSG00000215018.5 + ENSG00000217801.5 + ENSG00000218510.3 + 
+                              ENSG00000226038.4 + ENSG00000226180.2 + ENSG00000227124.4 + 
+                              ENSG00000228106.1 + ENSG00000231351.2 + ENSG00000231690.2 + 
+                              ENSG00000232637.3 + ENSG00000233927.4 + ENSG00000234584.1 + 
+                              ENSG00000236485.1 + ENSG00000238198.1 + ENSG00000239389.3 + 
+                              ENSG00000162620.11 + ENSG00000187838.12 + 
+                              ENSG00000163703.13 + ENSG00000164008.9 + ENSG00000164946.15 + 
+                              ENSG00000165475.9 + ENSG00000167720.8 + ENSG00000167965.13 + 
+                              ENSG00000168291.8 + ENSG00000169914.5 + ENSG00000170260.4 + 
+                              ENSG00000172992.7 + ENSG00000176681.10 + ENSG00000176845.8 + 
+                              ENSG00000177868.7 + ENSG00000178201.3 + ENSG00000178826.6 + 
+                              ENSG00000178997.7 + ENSG00000179292.4 + ENSG00000179331.2 + 
+                              ENSG00000180422.3 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                              ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000185294.5 + 
+                              ENSG00000185829.11 + ENSG00000187010.14 + ENSG00000124275.10 + 
+                              ENSG00000125885.9 + ENSG00000131845.10 + ENSG00000132109.8 + 
+                              ENSG00000132313.10 + ENSG00000133739.11 + ENSG00000134574.7 + 
+                              ENSG00000136270.9 + ENSG00000136327.6 + ENSG00000138316.6 + 
+                              ENSG00000140104.9 + ENSG00000140382.10 + ENSG00000140497.12 + 
+                              ENSG00000143891.12 + ENSG00000144597.9 + ENSG00000146530.7 + 
+                              ENSG00000147509.9 + ENSG00000151632.12 + ENSG00000152749.7 + 
+                              ENSG00000152926.10 + ENSG00000153956.11 + ENSG00000154781.11 + 
+                              ENSG00000155093.13 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                              ENSG00000157326.14 + ENSG00000160953.10 + ENSG00000160961.7 + 
+                              ENSG00000161640.11 +  ENSG00000143862.3 + ENSG00000058866.10 + 
+                              ENSG00000065268.6 + ENSG00000066651.13 + ENSG00000072864.8 + 
+                              ENSG00000100376.7 + ENSG00000100429.13 + ENSG00000100505.9 + 
+                              ENSG00000105373.14 + ENSG00000108001.9 + ENSG00000108272.9 + 
+                              ENSG00000108828.11 + ENSG00000111077.13 + ENSG00000115266.7 + 
+                              ENSG00000116198.8 + gender + PC1 + PC2 + age, data = total)
+
+summary(modelo_Amig_final_W1)
+
+step( modelo_Amig_final_W1, direction = "both", scale =  0.51)
+
+modelo_Amig_final_W1 <- lm(formula = total$dwb_dist_fl.1 ~ ENSG00000188690.8 + ENSG00000196071.3 + 
+     ENSG00000197275.8 + ENSG00000197734.4 + ENSG00000198468.3 + 
+     ENSG00000213760.6 + ENSG00000214425.2 + ENSG00000215018.5 + 
+     ENSG00000217801.5 + ENSG00000218510.3 + ENSG00000227124.4 + 
+     ENSG00000228106.1 + ENSG00000231351.2 + ENSG00000231690.2 + 
+     ENSG00000232637.3 + ENSG00000233927.4 + ENSG00000236485.1 + 
+     ENSG00000187838.12 + ENSG00000164946.15 + ENSG00000167720.8 + 
+     ENSG00000167965.13 + ENSG00000169914.5 + ENSG00000176845.8 + 
+     ENSG00000178826.6 + ENSG00000178997.7 + ENSG00000183426.11 + 
+     ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000185294.5 + 
+     ENSG00000187010.14 + ENSG00000124275.10 + ENSG00000125885.9 + 
+     ENSG00000132109.8 + ENSG00000134574.7 + ENSG00000136270.9 + 
+     ENSG00000136327.6 + ENSG00000138316.6 + ENSG00000140104.9 + 
+     ENSG00000140382.10 + ENSG00000140497.12 + ENSG00000146530.7 + 
+     ENSG00000147509.9 + ENSG00000151632.12 + ENSG00000152749.7 + 
+     ENSG00000152926.10 + ENSG00000153956.11 + ENSG00000154781.11 + 
+     ENSG00000155093.13 + ENSG00000155761.9 + ENSG00000156304.10 + 
+     ENSG00000157326.14 + ENSG00000160953.10 + ENSG00000160961.7 + 
+     ENSG00000161640.11 + ENSG00000058866.10 + ENSG00000065268.6 + 
+     ENSG00000066651.13 + ENSG00000072864.8 + ENSG00000100429.13 + 
+     ENSG00000108001.9 + ENSG00000108272.9 + ENSG00000108828.11 + 
+     ENSG00000116198.8 + gender + PC1 + PC2 + age, data = total)
+
+p_ajustado_modelo_W1 <- as.data.frame(p.adjust(modelo_Amig_final_W1$coefficients, method = "bonferroni"))
+
+teste_top_modelo_W1 <- lm(formula = total$dwb_dist_fl.1 ~ ENSG00000183426.11 + ENSG00000136327.6 + ENSG00000183426.11 + gender + PC1 +PC2 + age, data=total) 
+summary(teste_top_modelo_W1)
+p_ajustado_teste_top_genes <- as.data.frame(p.adjust(teste_top_modelo_W1$, method = "fdr"))
+summary(teste_top_modelo_W1$coefficients)
+
+
+pvals <- as.data.frame(model, summary(modelo_Amig_final_W0$coefficients [2,4]))
+p_ajustado_W0_Amigdala <- as.data.frame(p.adjust(resultados_w0_Amigdala$`Pr(>|t|)`, method = "fdr", n = 86))
+p_ajustado_W1_Amigdala <- as.data.frame(p.adjust(Resultados_Amygdala_w1$P, method = "bonferroni", n = 68 ))
+
+names(p_ajustado_W1_Amigdala)[names(p_ajustado_W1_Amigdala) == "p.adjust(Resultados_Amygdala_w1$P, method = \"fdr\")"] <- "p"
+names(p_ajustado_W1_Amigdala)[names(p_ajustado_W1_Amigdala) == "p.adjust(Resultados_Amygdala_w1$P, method = \"bonferroni")"] <- "p"
+summary(p)"
+
+write.table(p_ajustado_W0_Amigdala, "./p_Amygdala_W0 ", sep="\t", col.names = F, row.names = F, quote = F)
+write.table(p_ajustado_W1_Amigdala, "./p_Amygdala_W1_bonferroni ", sep="\t", col.names = F, row.names = F, quote = F)
+
+write.csv2(pd, "./Ids_Brainseq ")
+
+## merge para o fam da genotipagem 
+names(Ids_uso)[names(Ids_uso) == "V1"] <- " ID_certo"
+names(Ids_uso)[names(Ids_uso) == "V2"] <- "V1"
+
+fam_genotipagem_IDs <- merge(Ids_uso,LIBD_Brain_DLPFC_szControls_imputed,by="V1", type="full")
+write.table(fam_genotipagem_IDs, "./fam_genotipagem_ids ", sep="\t", col.names = F, row.names = F, quote = F)
+
+## Amigdala Fear
+
+ids <- as.data.frame(colnames(gene_pheno))
+write.table(ids, "./ids_Amigdala ", sep="\t", col.names = T, row.names = F, quote = F)
+
+modelo_Amig_fear_1_w1 <- lm(formula = gene_pheno$dwb_fear_fl.1 ~ + colocar_genes +
+                             PC1 + PC2 + gender + age,  data = gene_pheno)
+summary(lm_fear_final_w1 )
+
+step( lm_fear_final_w1, direction = "both", scale =  0.522)
+
+1_w0_fear<-lm(formula = gene_pheno$dwb_fear_fl ~ ENSG00000007171.12 + ENSG00000010219.9 + 
+     ENSG00000068654.11 + ENSG00000070269.9 + ENSG00000097046.8 + 
+     ENSG00000100304.12 + ENSG00000101191.12 + ENSG00000104327.3 + 
+     ENSG00000105373.14 + ENSG00000107147.7 + ENSG00000108107.8 + 
+     ENSG00000108384.10 + ENSG00000112619.6 + ENSG00000115806.8 + 
+     ENSG00000116127.13 + ENSG00000117139.12 + ENSG00000117691.5 + 
+     ENSG00000119943.6 + ENSG00000122375.7 + ENSG00000122420.5 + 
+     ENSG00000122548.3 + PC2 + gender + age + ENSG00000113721.9, 
+   data = gene_pheno)
+
+lm_fear_w0_2 -> mm(formula = gene_pheno$dwb_fear_fl ~ ENSG00000123600.14 + ENSG00000124116.14 + 
+    ENSG00000124256.10 + ENSG00000126773.8 + ENSG00000128645.11 + 
+    ENSG00000129673.5 + ENSG00000131069.15 + ENSG00000134285.6 + 
+    ENSG00000138399.13 + ENSG00000139624.8 + ENSG00000140398.9 + 
+    ENSG00000140497.12 + ENSG00000140939.10 + ENSG00000141252.15 + 
+    ENSG00000142089.11 + ENSG00000142794.14 + ENSG00000144648.10 + 
+    ENSG00000145692.10 + ENSG00000148481.9 + ENSG00000149089.8 + 
+    ENSG00000149182.10 + ENSG00000154252.11 + ENSG00000154874.10 + 
+    ENSG00000161640.11 + PC1 + PC2 + gender + ENSG00000133433.6 + 
+    ENSG00000152117.13 + ENSG00000135916.11, data = gene_pheno)
+
+m_fear_w0_3 <- lm(formula = gene_pheno$dwb_fear_fl ~ ENSG00000162298.12 + ENSG00000163631.12 + 
+    ENSG00000163703.13 + ENSG00000163913.7 + ENSG00000165389.6 + 
+    ENSG00000165916.4 + ENSG00000166435.11 + ENSG00000166928.6 + 
+    ENSG00000167264.13 + ENSG00000167670.11 + ENSG00000167720.8 + 
+    ENSG00000168026.12 + ENSG00000168038.6 + ENSG00000168062.5 + 
+    ENSG00000168393.8 + ENSG00000168811.2 + ENSG00000169515.5 + 
+    ENSG00000171773.2 + ENSG00000171777.11 + ENSG00000172167.3 + 
+    ENSG00000178826.6 + ENSG00000178927.12 + ENSG00000179277.9 + 
+    ENSG00000180535.3 + ENSG00000181396.8 + ENSG00000181754.6 + 
+    ENSG00000183287.9 + ENSG00000183426.11 + ENSG00000185324.17 + 
+    ENSG00000186806.5 + ENSG00000187116.9 + PC1 + gender + age, 
+  data = gene_pheno)
+
+
+lm_fear_w0_4 <- lm(formula = gene_pheno$dwb_fear_fl ~ ENSG00000187595.10 + ENSG00000188599.13 + 
+     ENSG00000196126.6 + ENSG00000196284.9 + ENSG00000197580.7 + 
+     ENSG00000198468.3 + ENSG00000204164.6 + ENSG00000204673.6 + 
+     ENSG00000205583.9 + ENSG00000215018.5 + ENSG00000220575.3 + 
+     ENSG00000225791.2 + ENSG00000226690.2 + ENSG00000227124.4 + 
+     ENSG00000228570.3 + ENSG00000229180.4 + ENSG00000229212.3 + 
+     ENSG00000232637.3 + ENSG00000232653.4 + ENSG00000241945.3 + 
+     ENSG00000241954.1 + PC2 + gender + ENSG00000197568.9 + ENSG00000204351.7, 
+   data = gene_pheno)
+
+
+
+lm_fear_w0_5 <- lm(formula = gene_pheno$dwb_fear_fl ~ ENSG00000243678.7 + ENSG00000243709.1 + 
+                     ENSG00000245156.1 + ENSG00000248375.1 + ENSG00000248469.1 + 
+                     ENSG00000250182.2 + ENSG00000250506.2 + ENSG00000250508.1 + 
+                     ENSG00000253276.1 + ENSG00000253633.1 + ENSG00000253771.1 + 
+                     ENSG00000255328.1 + ENSG00000256594.3 + ENSG00000257511.1 + 
+                     ENSG00000257949.2 + ENSG00000259915.1 + ENSG00000260011.2 + 
+                     ENSG00000264469.1 + ENSG00000264538.2 + ENSG00000269990.1 + 
+                     ENSG00000270020.1 + ENSG00000270424.1 + ENSG00000270587.1 + 
+                     ENSG00000270972.1 + ENSG00000271324.1 + ENSG00000272221.1 + 
+                     ENSG00000272856.1 + PC2 + gender, data = gene_pheno)
+
+lm_fear_w1_1 <- lm(formula = gene_pheno$dwb_fear_fl.1 ~ ENSG00000066651.13 + 
+                    ENSG00000068654.11 + ENSG00000072864.8 + ENSG00000075399.8 + 
+                    ENSG00000100376.7 + ENSG00000100429.13 + ENSG00000100505.9 + 
+                    ENSG00000100802.10 + ENSG00000102858.8 + ENSG00000105186.10 + 
+                    ENSG00000105373.14 + ENSG00000108001.9 + ENSG00000108107.8 + 
+                    ENSG00000108384.10 + ENSG00000108828.11 + ENSG00000115266.7 + 
+                    ENSG00000115602.12 + ENSG00000116198.8 + ENSG00000117450.9 + 
+                    gender + ENSG00000090905.13, data = gene_pheno)
+
+lm_fear_2_3_w1 <-  lm(formula = gene_pheno$dwb_fear_fl.1 ~ ENSG00000161999.7 + ENSG00000162994.11 + 
+                        ENSG00000163703.13 + ENSG00000163933.5 + ENSG00000164615.3 + 
+                        ENSG00000165475.9 + ENSG00000166436.11 + ENSG00000167720.8 + 
+                        ENSG00000167965.13 + ENSG00000168291.8 + ENSG00000169760.13 + 
+                        ENSG00000169914.5 + ENSG00000171853.11 + ENSG00000173517.6 + 
+                        ENSG00000174136.7 + ENSG00000176845.8 + ENSG00000177042.10 + 
+                        ENSG00000177236.3 + ENSG00000178201.3 + ENSG00000178826.6 + 
+                        ENSG00000178927.12 + ENSG00000178997.7 + ENSG00000180422.3 + 
+                        ENSG00000183048.7 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                        ENSG00000183793.9 + ENSG00000183798.4 + gender + ENSG00000163041.5, 
+                      data = gene_pheno)
+
+lm_fear_3_w1 <- ENSG00000243678.7 + ENSG00000244291.1 + ENSG00000244731.3 + 
+  ENSG00000248124.3 + ENSG00000248971.2 + ENSG00000250564.1 + 
+  ENSG00000254333.1 + ENSG00000257139.1 + ENSG00000257949.2 + 
+  ENSG00000259433.2 + ENSG00000261617.1 + ENSG00000266907.1 + 
+  ENSG00000267056.2 + ENSG00000268658.1 + ENSG00000269416.1 + 
+  ENSG00000269990.1 + ENSG00000270127.1 + ENSG00000270964.1 + 
+  ENSG00000272447.1 + ENSG00000272859.1 + ENSG00000272960.1 + 
+  PC1 + gender + ENSG00000261098.1, data = gene_pheno)
+
+lm_fear_2_w1 <- lm (formula = gene_pheno$dwb_fear_fl.1 ~ ENSG00000123545.5 + ENSG00000124587.9 + 
+                      ENSG00000130584.6 + ENSG00000131401.7 + ENSG00000132842.9 + 
+                      ENSG00000133739.11 + ENSG00000134253.5 + ENSG00000136270.9 + 
+                      ENSG00000136327.6 + ENSG00000138316.6 + ENSG00000138709.13 + 
+                      ENSG00000140104.9 + ENSG00000140382.10 + ENSG00000143437.16 + 
+                      ENSG00000143862.3 + ENSG00000144771.7 + ENSG00000146530.7 + 
+                      ENSG00000147419.12 + ENSG00000151632.12 + ENSG00000151789.5 + 
+                      ENSG00000152582.8 + ENSG00000152749.7 + ENSG00000152778.7 + 
+                      ENSG00000154781.11 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                      ENSG00000156831.3 + ENSG00000157326.14 + ENSG00000160953.10 + 
+                      ENSG00000160961.7 + ENSG00000161640.11 + PC1 + gender, data = gene_pheno)
+
+lm_fear_final_w1 <- lm(formula = df$dwb_fear_fl.1 ~ ENSG00000066651.13 + 
+                         ENSG00000068654.11 + ENSG00000072864.8 + ENSG00000075399.8 + 
+                         ENSG00000100376.7 + ENSG00000100429.13 + ENSG00000100505.9 + 
+                         ENSG00000100802.10 + ENSG00000102858.8 + ENSG00000105186.10 + 
+                         ENSG00000105373.14 + ENSG00000108001.9 + ENSG00000108107.8 + 
+                         ENSG00000108384.10 + ENSG00000108828.11 + ENSG00000115266.7 + 
+                         ENSG00000115602.12 + ENSG00000116198.8 + ENSG00000117450.9 + 
+                         ENSG00000090905.13 + ENSG00000161999.7 + ENSG00000162994.11 + 
+                         ENSG00000163703.13 + ENSG00000163933.5 + ENSG00000164615.3 + 
+                         ENSG00000165475.9 + ENSG00000166436.11 + ENSG00000167720.8 + 
+                         ENSG00000167965.13 + ENSG00000168291.8 + ENSG00000169760.13 + 
+                         ENSG00000169914.5 + ENSG00000171853.11 + ENSG00000173517.6 + 
+                         ENSG00000174136.7 + ENSG00000176845.8 + ENSG00000177042.10 + 
+                         ENSG00000177236.3 + ENSG00000178201.3 + ENSG00000178826.6 + 
+                         ENSG00000178927.12 + ENSG00000178997.7 + ENSG00000180422.3 + 
+                         ENSG00000183048.7 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                         ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000163041.5 + ENSG00000243678.7 + ENSG00000244291.1 + ENSG00000244731.3 + 
+                         ENSG00000248124.3 + ENSG00000248971.2 + ENSG00000250564.1 + 
+                         ENSG00000254333.1 + ENSG00000257139.1 + ENSG00000257949.2 + 
+                         ENSG00000259433.2 + ENSG00000261617.1 + ENSG00000266907.1 + 
+                         ENSG00000267056.2 + ENSG00000268658.1 + ENSG00000269416.1 + 
+                         ENSG00000269990.1 + ENSG00000270127.1 + ENSG00000270964.1 + 
+                         ENSG00000272447.1 + ENSG00000272859.1 + ENSG00000272960.1 + ENSG00000123545.5 + ENSG00000124587.9 + 
+                         ENSG00000130584.6 + ENSG00000131401.7 + ENSG00000132842.9 + 
+                         ENSG00000133739.11 + ENSG00000134253.5 + ENSG00000136270.9 + 
+                         ENSG00000136327.6 + ENSG00000138316.6 + ENSG00000138709.13 + 
+                         ENSG00000140104.9 + ENSG00000140382.10 + ENSG00000143437.16 + 
+                         ENSG00000143862.3 + ENSG00000144771.7 + ENSG00000146530.7 + 
+                         ENSG00000147419.12 + ENSG00000151632.12 + ENSG00000151789.5 + 
+                         ENSG00000152582.8 + ENSG00000152749.7 + ENSG00000152778.7 + 
+                         ENSG00000154781.11 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                         ENSG00000156831.3 + ENSG00000157326.14 + ENSG00000160953.10 + 
+                         ENSG00000160961.7 + ENSG00000161640.11 + ENSG00000261098.1 + PC1 +PC2 + age + gender , data = df) 
+
+### Final regressao fear w0
+lm_fear_w1_finalzao <- lm(formula = df$dwb_fear_fl.1 ~ ENSG00000066651.13 + 
+     ENSG00000068654.11 + ENSG00000072864.8 + ENSG00000100429.13 + 
+     ENSG00000100505.9 + ENSG00000100802.10 + ENSG00000108001.9 + 
+     ENSG00000108107.8 + ENSG00000108384.10 + ENSG00000108828.11 + 
+     ENSG00000115266.7 + ENSG00000116198.8 + ENSG00000117450.9 + 
+     ENSG00000161999.7 + ENSG00000162994.11 + ENSG00000163933.5 + 
+     ENSG00000164615.3 + ENSG00000167720.8 + ENSG00000167965.13 + 
+     ENSG00000168291.8 + ENSG00000169914.5 + ENSG00000171853.11 + 
+     ENSG00000176845.8 + ENSG00000178201.3 + ENSG00000178997.7 + 
+     ENSG00000180422.3 + ENSG00000183426.11 + ENSG00000183666.12 + 
+     ENSG00000183793.9 + ENSG00000243678.7 + ENSG00000244291.1 + 
+     ENSG00000244731.3 + ENSG00000248124.3 + ENSG00000248971.2 + 
+     ENSG00000254333.1 + ENSG00000259433.2 + ENSG00000261617.1 + 
+     ENSG00000266907.1 + ENSG00000267056.2 + ENSG00000268658.1 + 
+     ENSG00000270127.1 + ENSG00000272447.1 + ENSG00000272859.1 + 
+     ENSG00000272960.1 + ENSG00000124587.9 + ENSG00000130584.6 + 
+     ENSG00000131401.7 + ENSG00000133739.11 + ENSG00000134253.5 + 
+     ENSG00000136270.9 + ENSG00000136327.6 + ENSG00000138316.6 + 
+     ENSG00000138709.13 + ENSG00000140104.9 + ENSG00000143437.16 + 
+     ENSG00000143862.3 + ENSG00000144771.7 + ENSG00000146530.7 + 
+     ENSG00000151632.12 + ENSG00000152749.7 + ENSG00000152778.7 + 
+     ENSG00000154781.11 + ENSG00000155761.9 + ENSG00000156304.10 + 
+     ENSG00000156831.3 + ENSG00000161640.11 + PC1 + gender + age + PC2 + ENSG00000269990.1, 
+   data = df)
+summary(lm_fear_w1_finalzao)
+
+p_ajustado_W1_Amigdala_fear <- as.data.frame(p.adjust(Resultados_w1_fear$`Pr(>|t|)`, method = "bonferroni", n = 72))
+
+#########################################
+#MODELOS FINAIS
+#########################################
+
+###W0 distress###
+WO_distress <- lm(formula = df$dwb_dist_fl ~ ENSG00000007171.12 + ENSG00000068654.11 + 
+                    ENSG00000070269.9 + ENSG00000097046.8 + ENSG00000100304.12 + 
+                    ENSG00000101191.12 + ENSG00000104327.3 + ENSG00000107147.7 + 
+                    ENSG00000108384.10 + ENSG00000110768.7 + ENSG00000116127.13 + 
+                    ENSG00000117139.12 + ENSG00000117691.5 + ENSG00000119943.6 + 
+                    ENSG00000119946.9 + ENSG00000122375.7 + ENSG00000122420.5 + 
+                    ENSG00000122548.3 + ENSG00000123600.14 + ENSG00000124256.10 + 
+                    ENSG00000131069.15 + ENSG00000134285.6 + ENSG00000134574.7 + 
+                    ENSG00000140939.10 + ENSG00000141252.15 + ENSG00000142794.14 + 
+                    ENSG00000148481.9 + ENSG00000154874.10 + ENSG00000155393.8 + 
+                    ENSG00000155761.9 + ENSG00000161640.11 + ENSG00000163631.12 + 
+                    ENSG00000163703.13 + ENSG00000163795.9 + ENSG00000163913.7 + 
+                    ENSG00000165389.6 + ENSG00000166435.11 + ENSG00000167720.8 + 
+                    ENSG00000168038.6 + ENSG00000168393.8 + ENSG00000168811.2 + 
+                    ENSG00000169515.5 + ENSG00000180902.12 + ENSG00000181396.8 + 
+                    ENSG00000182685.3 + ENSG00000183287.9 + ENSG00000185324.17 + 
+                    ENSG00000186806.5 + ENSG00000187116.9 + ENSG00000187595.10 + 
+                    ENSG00000187624.7 + ENSG00000196126.6 + ENSG00000197734.4 + 
+                    ENSG00000198468.3 + ENSG00000204164.6 + ENSG00000204351.7 + 
+                    ENSG00000204632.7 + ENSG00000204673.6 + ENSG00000220575.3 + 
+                    ENSG00000225791.2 + ENSG00000226259.6 + ENSG00000232637.3 + 
+                    ENSG00000236297.1 + ENSG00000242086.4 + ENSG00000243678.7 + 
+                    ENSG00000245156.1 + ENSG00000256594.3 + ENSG00000257511.1 + 
+                    ENSG00000259728.1 + ENSG00000260011.2 + ENSG00000260804.2 + 
+                    ENSG00000264538.2 + ENSG00000272221.1 + ENSG00000273142.1 + 
+                    ENSG00000273290.1 + PC1 + PC2 + gender + age + ENSG00000010219.9, 
+                  data = df)
+
+p_ajustado_W0_distress <- as.data.frame(p.adjust(Resultado_W0_distress_certo$Valor_P, method = "fdr", n = 133))
+  
+###############################################
+################ W1 DISTRESS ##################
+###############################################
+
+W1_distress <- lm(formula = df$dwb_dist_fl.1 ~ ENSG00000188690.8 + ENSG00000196071.3 + 
+                             ENSG00000197275.8 + ENSG00000197734.4 + ENSG00000198468.3 + 
+                             ENSG00000213760.6 + ENSG00000214425.2 + ENSG00000215018.5 + 
+                             ENSG00000217801.5 + ENSG00000218510.3 + ENSG00000227124.4 + 
+                             ENSG00000228106.1 + ENSG00000231351.2 + ENSG00000231690.2 + 
+                             ENSG00000232637.3 + ENSG00000233927.4 + ENSG00000236485.1 + 
+                             ENSG00000187838.12 + ENSG00000164946.15 + ENSG00000167720.8 + 
+                             ENSG00000167965.13 + ENSG00000169914.5 + ENSG00000176845.8 + 
+                             ENSG00000178826.6 + ENSG00000178997.7 + ENSG00000183426.11 + 
+                             ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000185294.5 + 
+                             ENSG00000187010.14 + ENSG00000124275.10 + ENSG00000125885.9 + 
+                             ENSG00000132109.8 + ENSG00000134574.7 + ENSG00000136270.9 + 
+                             ENSG00000136327.6 + ENSG00000138316.6 + ENSG00000140104.9 + 
+                             ENSG00000140382.10 + ENSG00000140497.12 + ENSG00000146530.7 + 
+                             ENSG00000147509.9 + ENSG00000151632.12 + ENSG00000152749.7 + 
+                             ENSG00000152926.10 + ENSG00000153956.11 + ENSG00000154781.11 + 
+                             ENSG00000155093.13 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                             ENSG00000157326.14 + ENSG00000160953.10 + ENSG00000160961.7 + 
+                             ENSG00000161640.11 + ENSG00000058866.10 + ENSG00000065268.6 + 
+                             ENSG00000066651.13 + ENSG00000072864.8 + ENSG00000100429.13 + 
+                             ENSG00000108001.9 + ENSG00000108272.9 + ENSG00000108828.11 + 
+                             ENSG00000116198.8 + gender + PC1 + PC2 + age, data = df)
+summary(W1_distress)
+###############################################
+################ W0 FEAR ##################
+###############################################
+
+W0_fear <- lm(formula = df$dwb_fear_fl ~ ENSG00000066651.13 + 
+                         ENSG00000068654.11 + ENSG00000072864.8 + ENSG00000075399.8 + 
+                         ENSG00000100376.7 + ENSG00000100429.13 + ENSG00000100505.9 + 
+                         ENSG00000100802.10 + ENSG00000102858.8 + ENSG00000105186.10 + 
+                         ENSG00000105373.14 + ENSG00000108001.9 + ENSG00000108107.8 + 
+                         ENSG00000108384.10 + ENSG00000108828.11 + ENSG00000115266.7 + 
+                         ENSG00000115602.12 + ENSG00000116198.8 + ENSG00000117450.9 + 
+                         ENSG00000090905.13 + ENSG00000161999.7 + ENSG00000162994.11 + 
+                         ENSG00000163703.13 + ENSG00000163933.5 + ENSG00000164615.3 + 
+                         ENSG00000165475.9 + ENSG00000166436.11 + ENSG00000167720.8 + 
+                         ENSG00000167965.13 + ENSG00000168291.8 + ENSG00000169760.13 + 
+                         ENSG00000169914.5 + ENSG00000171853.11 + ENSG00000173517.6 + 
+                         ENSG00000174136.7 + ENSG00000176845.8 + ENSG00000177042.10 + 
+                         ENSG00000177236.3 + ENSG00000178201.3 + ENSG00000178826.6 + 
+                         ENSG00000178927.12 + ENSG00000178997.7 + ENSG00000180422.3 + 
+                         ENSG00000183048.7 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                         ENSG00000183793.9 + ENSG00000183798.4 + ENSG00000163041.5 + ENSG00000243678.7 + ENSG00000244291.1 + ENSG00000244731.3 + 
+                         ENSG00000248124.3 + ENSG00000248971.2 + ENSG00000250564.1 + 
+                         ENSG00000254333.1 + ENSG00000257139.1 + ENSG00000257949.2 + 
+                         ENSG00000259433.2 + ENSG00000261617.1 + ENSG00000266907.1 + 
+                         ENSG00000267056.2 + ENSG00000268658.1 + ENSG00000269416.1 + 
+                         ENSG00000269990.1 + ENSG00000270127.1 + ENSG00000270964.1 + 
+                         ENSG00000272447.1 + ENSG00000272859.1 + ENSG00000272960.1 + ENSG00000123545.5 + ENSG00000124587.9 + 
+                         ENSG00000130584.6 + ENSG00000131401.7 + ENSG00000132842.9 + 
+                         ENSG00000133739.11 + ENSG00000134253.5 + ENSG00000136270.9 + 
+                         ENSG00000136327.6 + ENSG00000138316.6 + ENSG00000138709.13 + 
+                         ENSG00000140104.9 + ENSG00000140382.10 + ENSG00000143437.16 + 
+                         ENSG00000143862.3 + ENSG00000144771.7 + ENSG00000146530.7 + 
+                         ENSG00000147419.12 + ENSG00000151632.12 + ENSG00000151789.5 + 
+                         ENSG00000152582.8 + ENSG00000152749.7 + ENSG00000152778.7 + 
+                         ENSG00000154781.11 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                         ENSG00000156831.3 + ENSG00000157326.14 + ENSG00000160953.10 + 
+                         ENSG00000160961.7 + ENSG00000161640.11 + ENSG00000261098.1 + PC1 +PC2 + age + gender , data = df) 
+
+
+###############################################
+################ W1 FEAR ##################
+###############################################
+
+
+W1_fear <- lm(formula = df$dwb_fear_fl.1 ~ ENSG00000066651.13 + 
+                            ENSG00000068654.11 + ENSG00000072864.8 + ENSG00000100429.13 + 
+                            ENSG00000100505.9 + ENSG00000100802.10 + ENSG00000108001.9 + 
+                            ENSG00000108107.8 + ENSG00000108384.10 + ENSG00000108828.11 + 
+                            ENSG00000115266.7 + ENSG00000116198.8 + ENSG00000117450.9 + 
+                            ENSG00000161999.7 + ENSG00000162994.11 + ENSG00000163933.5 + 
+                            ENSG00000164615.3 + ENSG00000167720.8 + ENSG00000167965.13 + 
+                            ENSG00000168291.8 + ENSG00000169914.5 + ENSG00000171853.11 + 
+                            ENSG00000176845.8 + ENSG00000178201.3 + ENSG00000178997.7 + 
+                            ENSG00000180422.3 + ENSG00000183426.11 + ENSG00000183666.12 + 
+                            ENSG00000183793.9 + ENSG00000243678.7 + ENSG00000244291.1 + 
+                            ENSG00000244731.3 + ENSG00000248124.3 + ENSG00000248971.2 + 
+                            ENSG00000254333.1 + ENSG00000259433.2 + ENSG00000261617.1 + 
+                            ENSG00000266907.1 + ENSG00000267056.2 + ENSG00000268658.1 + 
+                            ENSG00000270127.1 + ENSG00000272447.1 + ENSG00000272859.1 + 
+                            ENSG00000272960.1 + ENSG00000124587.9 + ENSG00000130584.6 + 
+                            ENSG00000131401.7 + ENSG00000133739.11 + ENSG00000134253.5 + 
+                            ENSG00000136270.9 + ENSG00000136327.6 + ENSG00000138316.6 + 
+                            ENSG00000138709.13 + ENSG00000140104.9 + ENSG00000143437.16 + 
+                            ENSG00000143862.3 + ENSG00000144771.7 + ENSG00000146530.7 + 
+                            ENSG00000151632.12 + ENSG00000152749.7 + ENSG00000152778.7 + 
+                            ENSG00000154781.11 + ENSG00000155761.9 + ENSG00000156304.10 + 
+                            ENSG00000156831.3 + ENSG00000161640.11 + PC1 + gender + age + PC2 + ENSG00000269990.1, 
+                          data = df)
+  
+p_ajustado_W0_distress <- as.data.frame(p.adjust(Resultado_W0_distress_certo$Valor_P, method = "bonferroni", n = 133))
+write.table(p_ajustado_W0_distress, "./P_W0_distress ", sep="\t", col.names = F, row.names = F, quote = F)
+colnames(Resultado_W0_distress_certo)
+
+sem_ponto <- separate(data = Resultado_W0_distress_certo, col = ensembl, into = c("ensembl_id", "right"), sep = "\\.")
+ensemblGenes <- sem_ponto[, -2]
+
+
+
+p_ajustado_W0_fear <- as.data.frame(p.adjust(Rsesultados_fear_w0$Valor_p, method = "bonferroni", n = 86))
+write.table(p_ajustado_W0_fear, "./P_W0_fear ", sep="\t", col.names = F, row.names = F, quote = F)
+
+
+p_ajustado_W1_distress <- as.data.frame(p.adjust(w1_distress$Valor_p, method = "bonferroni", n = 68))
+
+write.table(p_ajustado_W1_distress, "./P_W1_distress ", sep="\t", col.names = F, row.names = F, quote = F)
+
+p_ajustado_W1_fear <- as.data.frame(p.adjust(Resultados_w1_fear$Valor_p, method = "bonferroni", n = 72))
+write.table(p_ajustado_W1_fear, "./P_W1_fear ", sep="\t", col.names = F, row.names = F, quote = F)
+
+
+### Correlacoes ###
+mydata.cor = cor(Filtrado_sem_na, method = c("spearman"))
+
+corrplot(Filtrado_sem_na)
+         (
+  brary(corrplot)
+
+testena <- IDs_identicos[complete.cases(IDs_identicos), ]
+Teste_cor <- subset(IDs_identicos, select = c(2:11))
+
+plot(x=IDs_identicos$dwb_dist_fl, y=IDs_identicos$dwb_fear_fl)
+
+model_teste_expre_dot_imagem <- 'dwb_fear_fl ~ c*ENSG00000097046.8
+Ramyg ~ a*ENSG00000097046.8 
+dwb_fear_fl ~ b*Ramyg 
+ab:= a*b
+total:= c+ (a*b) '
+
+fit_teste_exp <- sem(model_teste_expre, data = df)
+
+
+summary(fit_SCZ1)
+fit_teste_Amigdala_dot_imagem <- sem(model_teste_expre_dot_imagem, data=Amig_dot_imagem, meanstructure=TRUE, se="bootstrap",
+                bootstrap=1000)
+
+
+summary(fit_teste_Amigdala_dot_imagem, fit.measures=TRUE)
+
+str(df$gender)                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  
+as.factor(df$gender)
+
+names(df)[names(df) == "IID"] <- "subjectid"
+Amig_dot_imagem <- merge(df, thbiaspara_adrielle ,by="subjectid")
+
+str(Amig_dot_w0$tHBIAS)
+str(Amig_dot_w0$dwb_dist_fl)
+
+teste <- znorm 
+
+library(psycho)
+library(lavaan)
+
+teste_z <- normalize(thbiaspara_adrielle, method="Z-score")
+
+imagem_volume <- subset(mydata_Volumes_QC, select = c(12:15,21))
+
+colnames(imagem_volume)
+
+teste_z <- scale(imagem_volume$Lamyg)/sqrt((imagem_volume$Lamyg-1)/imagem_volume$Lamyg)
+
+head(imagem_volume)
+
+
+read.dbf("./PrediXcan/Software/weights/gtex_v7_Brain_Amygdala_imputed_europeans_tw_0.5_signif.db")
+
+
+colnames(gene_Pred_Amygdala)
+
+#Mediate package
+install.packages("mediation")
+library(mediation)
+library(gvlma)
+?mediate
+
+fitM <- lm(tTBIAS ~ ENSG00000136327.6 , data=Amig_dot_imagem) #IV on M; Hours since dawn predicting coffee consumption
+fitY <- lm(dwb_p_fl ~ ENSG00000136327.6 + tTBIAS , data=Amig_dot_imagem ) #IV and M on DV; Hours since dawn and coffee predicting wakefulness
+
+gvlma(fitM) #data is positively skewed; could log transform (see Chap. 10 on assumptions)
+gvlma(fitY)
+
+fitMed <- mediate(fitM, fitY, treat="ENSG00000136327.6" , mediator="tTBIAS")
+summary(fitMed)
+plot(fitMed)
+
+fitMedBoot <- mediate(fitM, fitY, boot=TRUE, sims=10000, treat="ENSG00000136327.6", mediator="tTBIAS")
+summary(fitMedBoot)
+plot(fitMedBoot)
+
+######## moderation package 
+Xc    <- c(scale(Amig_dot_imagem$ENSG00000136327.6, center=TRUE, scale=FALSE))
+Zc    <- c(scale(Amig_dot_imagem$gender,  center=TRUE, scale=FALSE))
+
+fitMod <- lm(Amig_dot_imagem$dwb_p_fl.1 ~ Xc + Zc + Xc*Zc)
+fitMod_1 <- lm(dwb_p_fl.1 ~ Xc + gender + Xc*gender, data = Amig_dot_imagem)
+summary(fitMod_1)
+coef(summary(fitMod))
+
+gvlma(fitMod_1)
+install.packages("stargazer")
+library(stargazer)
+stargazer(fitMod_1,type="text", title = "ENSG00000136327.6 and gender")
+
+install.packages("rockchalk", dependencies = TRUE)
+library(rockchalk)
+ps  <- plotSlopes(fitMod_1, plotx="Xc", modx="gender", xlab = "ENSG00000136327.6", ylab = "gender", modxVals = "table", data = Amig_dot_imagem)
+
+colnames(Banco_feno_covar)
+colnames(thbiaspara_adrielle)
+
+ggplot(data = Amig_dot_imagem, mapping = aes(x =  ENSG00000136327.6, y = dwb_dist_fl.1 , color = gender)) + 
+geom_jitter() + # Use geom_jitter instead of geom_point, otherwise the points are drawn over each other
+geom_smooth(method='lm', se=FALSE)
+
+Amig_dot_imagem$dwb_dist_fl.1
