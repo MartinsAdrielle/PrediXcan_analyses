@@ -1,0 +1,134 @@
+############################
+####### Mediações ##########
+############################
+
+library(tidyverse)
+library(knitr)
+
+#Chamar banco final 
+df_clinico <- read.spss("./Banco_total_genes_final.sav", to.data.frame=TRUE, use.value.labels = FALSE, fileEncoding="latin1" )
+
+banco <- sem_na_Banco_exter_genes_tick 
+## Lavaan 
+library(lavaan)
+
+# setar a seed para reprodução 
+set.seed(1234)
+
+colnames(sem_na_Banco_exter_genes_tick)
+
+# Modelo Esternalazing W1
+
+model_Esternalazing <- 'dwb_ext_fl.1 ~ c*ENSG00000233542 + gender
+            tTBIAS ~ a*ENSG00000233542   + gender  
+  dwb_ext_fl.1 ~ b*tTBIAS
+  inderect:= a*b
+  total:= c+ (a*b) '
+
+fit_BOOT_W1_Exter_tBias <- sem(model_Esternalazing, data=Banco_total_exter_thbias_sem_na_NEW, meanstructure=TRUE, se="bootstrap",bootstrap=10000)
+
+## Mostra os resultados
+RNAGene_exter_tBias <- summary(fit_BOOT_W1_Exter_tBias, fit.measures=TRUE)
+
+## Salva os resultados  
+capture.output(RNAGene_exter_tBias, file = "./Mediações Exter/Mediation_RNAGene_exter_tBias_geral.txt")
+
+teste <- parameterestimates(fit_BOOT_W1_Exter_tBias , boot.ci.type = "bca.simple", standardized = TRUE)
+write.table(teste, file = "./Mediações Exter/Mediation_RNAGene_exter_tBias.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+write_sav(Banco_total_exter_thbias_sem_na_NEW, "Banco_total_exter_thbias_sem_na_NEW.sav")
+
+colnames(thbiaspara_adrielle)
+
+Pheno <- join_all(list(External_pheno_certo, thbiaspara_adrielle), type = "left") 
+Pheno_thbias <- subset(Pheno, select = c(1,2,4))
+write.table(Pheno, file = "./Pheno_tBias_Exter", sep = "\t", quote = FALSE, row.names = FALSE)
+
+###################################
+#### Testar o ENSG00000233542 #####
+###################################
+
+Com_gene_novo_exter <- subset(Brainseq_prefrontal, select = c( "IID","ENSG00000233542"))
+Banco_total_exter_thbias_sem_na_NEW <- join_all(list(Banco_total_exter_thbias_sem_na, Com_gene_novo_exter), by = "IID", type = "left") 
+
+##Alguns testes meus
+mulheres <- df_clinico[!(df_clinico$gender=="2"),]  
+
+write.table(Banco_inpd, file = "Distress_w1.txt", sep = "\t", quote = FALSE, row.names = FALSE)
+
+
+### Testes moderation 
+
+library(lavaan)
+library()
+
+# create interaction term between centered X (socst) and W (math)
+df <- Banco_total_Inter_sem_na %>% mutate(gene_x_Thbias = ENSG00000169814.8 * tTBIAS...13)
+
+# parameters
+moderation_model <- '
+  # regressions
+  dwb_dist_fl.1 ~ b1*ENSG00000169814.8
+  dwb_dist_fl.1 ~ b2*tTBIAS...13
+  dwb_dist_fl.1 ~ b3*gene_x_Thbias
+  
+  # define mean parameter label for centered math for use in simple slopes
+  tTBIAS...13 ~ bias.mean*1
+  
+  # define variance parameter label for centered math for use in simple slopes
+  tTBIAS...13 ~~ bias.var*tTBIAS...13
+  
+  # simple slopes for condition effect
+  SD.below := b1 + b3*(bias.mean - sqrt(bias.var))
+  mean := b1 + b3*(bias.mean)
+  SD.above := b1 + b3*(bias.mean + sqrt(bias.var))
+  '
+
+fit the model using nonparametric bootstrapping (this takes some time)
+sem1 <- sem(model = moderation_model,
+            data = df,
+            se = "bootstrap",
+            bootstrap = 10000)
+
+summary(sem1, fit.measures = TRUE, standardized = TRUE, rsquare = TRUE)
+
+parameterEstimates(sem1, boot.ci.type = "bca.simple",
+                   level = .95, ci = TRUE, standardized = FALSE)
+
+
+### Regressões lineares 
+
+ENSG00000136327.6_fear <- lm(data = Banco_total_Inter_sem_na_regressão, dwb_fear_fl.1 ~ ENSG00000136327.6 + gender + state)
+
+estimate<- as.data.frame(summary(ENSG00000136327.6_fear)$coefficients[2,1])
+SE <- as.data.frame(summary(ENSG00000136327.6_fear)$coefficients[2,2])
+t <- as.data.frame(summary(ENSG00000136327.6_fear)$coefficients[2,3])
+pvals <- as.data.frame(summary(ENSG00000136327.6_fear)$coefficients[2,4])
+r.sq <- as.data.frame(summary(ENSG00000136327.6_fear)$r.squared)
+
+
+## Merge para tabela final 
+tabela_ENSG00000136327.6_fear<- as.data.frame(cbind(estimate,SE,t,pvals,r.sq))
+names(tabela_ENSG00000136327.6_fear) <- c("Estimate", "SE", "t", "pvals", "r.sq")
+
+write.table(tabela_ENSG00000136327.6_fear, "./tabela_ENSG00000136327.6_fear", sep="\t", col.names = T, row.names = F, quote = F)
+summary(ENSG00000136327.6_fear)
+
+"ENSG00000169814.8"  "ENSG00000154451.10" "ENSG00000100429.13" "ENSG00000136327.6" 
+
+
+colnames(Banco_total_Inter_sem_na_regressão)
+## Regressão multi 
+
+Multi_exter <- lm(data = Banco_total_exter_sem_na_regressão, dwb_ext_fl.1 ~ ENSG00000116132 + ENSG00000077943 + ENSG00000092201 + ENSG00000165646 + ENSG00000115946  + gender + state)
+summary(Multi_exter)
+lm.beta(Multi_Fear)
+
+ p_ajustado_Exter <- as.data.frame(p.adjust(Ps.Exter$Valor, method = "bonferroni"))
+
+
+
+Genes_Exter <- subset(BrainSeq_genes, select = c("IID", "ENSG00000116132", "ENSG00000077943", "ENSG00000092201", "ENSG00000165646", "ENSG00000115946" ))
+Banco_total_exter_sem_na_regressão <- join_all(list(Banco_total_Inter_sem_na_regressão, Genes_Exter), by = "IID", type = "left") 
+
+write_sav(Banco_total_exter_sem_na_regressão, path = "./Banco_total_exter_sem_na_regressão.sav")
